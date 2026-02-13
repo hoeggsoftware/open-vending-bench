@@ -224,16 +224,22 @@ def calculate_total_sales_and_report(vending_machine: VendingMachine, weather: s
         if slot['item'] is not None:
             unique_products.add(slot['item'].name)
     unique_products = len(unique_products)
-    total_sales = 0
+    total_sales = 0.0
+    total_units = 0
     for slot_id, slot in vending_machine_slots.items():
         if slot['item'] is None:
             continue
         item_data = slot['item']
         final_sales = calculate_item_final_sales(item_data, behavior_metrics, unique_products, weather, month, day_of_week)
-        vending_machine.sell_item(slot_id, final_sales)
-        total_sales += final_sales * item_data.price
-        report += f"{item_data.name}: ${final_sales}\n"
-    
-    report += f"\nTotal Sales: ${total_sales}"
+        result = vending_machine.sell_item(slot_id, final_sales)
+        if result:
+            _, actual_sold = result
+            revenue = actual_sold * item_data.price
+            total_sales += revenue
+            total_units += actual_sold
+            report += f"  {item_data.name}: {actual_sold} units sold @ ${item_data.price:.2f} = ${revenue:.2f}\n"
+
+    report += f"\nTotal Units Sold: {total_units}"
+    report += f"\nTotal Revenue: ${total_sales:.2f}"
 
     return total_sales, report

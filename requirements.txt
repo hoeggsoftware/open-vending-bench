@@ -1,6 +1,7 @@
 litellm
 requests
 python-dotenv
+cerebras-cloud-sdk
 
 
 

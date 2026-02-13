@@ -1,6 +1,7 @@
 """
 This file contains the tools that the primary agent can use to take actions.
 """
+
 from datetime import datetime, timedelta
 import json
 
@@ -8,10 +9,10 @@ import json
 def wait_for_next_day(simulation_ref):
     """
     Advance simulation time to 6:00 AM of the next day
-    
+
     Args:
         simulation_ref: Reference to the VendingMachineSimulation instance
-    
+
     Returns:
         dict: Result containing success status and new day information
     """
@@ -19,32 +20,31 @@ def wait_for_next_day(simulation_ref):
     current_time = simulation_ref.get_current_time()
     # Calculate next day's 6:00 AM
     next_day = current_time.date() + timedelta(days=1)
-    next_6am = datetime.combine(next_day, current_time.time().replace(hour=6, minute=0, second=0, microsecond=0))
+    next_6am = datetime.combine(
+        next_day, current_time.time().replace(hour=6, minute=0, second=0, microsecond=0)
+    )
     next_6am = next_6am.replace(tzinfo=current_time.tzinfo)
-    
+
     # Update simulation time
-    simulation_ref.current_time = next_6am    
+    simulation_ref.current_time = next_6am
     return f"Moved day forward to {next_6am}"
 
 
 def send_email(simulation_ref, recipient, subject, body):
     """
     Send an email to a supplier or business contact
-    
+
     Args:
         simulation_ref: Reference to the VendingMachineSimulation instance
         recipient: Email address of the recipient
         subject: Email subject line
         body: Email message body
-    
+
     Returns:
         str: Confirmation of email sent
     """
     email_id = simulation_ref.email_system.send_email(
-        recipient=recipient,
-        subject=subject,
-        body=body,
-        email_type="order"
+        recipient=recipient, subject=subject, body=body, email_type="order"
     )
     return f"Email sent to {recipient} with subject '{subject}' (ID: {email_id})"
 
@@ -74,6 +74,110 @@ def check_storage_quantities(simulation_ref):
     """
     return simulation_ref.storage.get_storage_report()
 
+
+# --- Scratchpad tools ---
+def scratchpad_write(simulation_ref, text):
+    """Write text to the scratchpad"""
+    return simulation_ref.scratchpad.write(text)
+
+
+def read_scratchpad(simulation_ref):
+    """Read the scratchpad contents"""
+    return simulation_ref.scratchpad.read()
+
+
+def erase_scratchpad(simulation_ref):
+    """Clear the scratchpad"""
+    return simulation_ref.scratchpad.erase()
+
+
+# --- Key-Value store tools ---
+def get_kw_value(simulation_ref, key):
+    """Get a value from the key-value store"""
+    return simulation_ref.kv_store.get(key)
+
+
+def set_kw_value(simulation_ref, key, value):
+    """Set a value in the key-value store"""
+    return simulation_ref.kv_store.set(key, value)
+
+
+def delete_kw_value(simulation_ref, key):
+    """Delete a key from the key-value store"""
+    return simulation_ref.kv_store.delete(key)
+
+
+# --- Vector DB tools ---
+def add_to_vector_db(simulation_ref, text):
+    """Add a document to the vector database"""
+    return simulation_ref.vector_db.add(text)
+
+
+def search_vector_db(simulation_ref, query, top_k=3):
+    """Search for similar documents in the vector database"""
+    return simulation_ref.vector_db.search(query, int(top_k))
+
+
+# --- Machine inventory tool ---
+def get_machine_inventory(simulation_ref):
+    """Get the current vending machine inventory"""
+    slots = simulation_ref.vending_machine.get_slots()
+    lines = ["VENDING MACHINE INVENTORY", "=" * 40]
+    for slot_id, slot in slots.items():
+        if slot['item']:
+            lines.append(
+                f"  Slot {slot_id} [{slot['size_type']}]: "
+                f"{slot['item'].name} x{slot['quantity']} @ ${slot['item'].price:.2f}"
+            )
+        else:
+            lines.append(f"  Slot {slot_id} [{slot['size_type']}]: EMPTY")
+    return "\n".join(lines)
+
+
+# --- Balance tool ---
+def get_money_balance(simulation_ref):
+    """Get the current money balance"""
+    return f"Current balance: ${simulation_ref.balance:.2f}"
+
+
+# --- Web search tool ---
+def ai_web_search(simulation_ref, query):
+    """Search the web using Perplexity API"""
+    from search import search_perplexity
+    content, error = search_perplexity(query)
+    if error:
+        return f"Search failed: {error}"
+    return content
+
+
+# --- Stock machine tool ---
+def stock_machine(simulation_ref, item_name, slot_id, quantity):
+    """Move items from backroom storage to a vending machine slot"""
+    storage = simulation_ref.storage
+    vm = simulation_ref.vending_machine
+    quantity = int(quantity)
+
+    # Check storage has the item
+    item_obj = storage.get_item(item_name)
+    if item_obj is None:
+        return f"Item '{item_name}' not found in storage."
+
+    available = storage.get_quantity(item_name)
+    if available < quantity:
+        return f"Only {available} units of '{item_name}' in storage (requested {quantity})."
+
+    # Attempt to stock into vending machine
+    if not vm.can_stock_item(slot_id, item_obj):
+        return f"Cannot stock '{item_name}' in slot {slot_id} (wrong size or different item already there)."
+
+    if not vm.stock_item(slot_id, item_obj, quantity):
+        return f"Slot {slot_id} doesn't have enough capacity for {quantity} units."
+
+    # Remove from storage
+    storage.remove_items(item_name, quantity)
+    return f"Stocked {quantity}x {item_name} into slot {slot_id}."
+
+
 # Tools schema for LiteLLM function calling
 TOOLS_LIST = [
     {
@@ -81,12 +185,8 @@ TOOLS_LIST = [
         "function": {
             "name": "wait_for_next_day",
             "description": "Advance simulation time to 6:00 AM of the next day. This will process daily fees, update weather, and provide a new day report.",
-            "parameters": {
-                "type": "object",
-                "properties": {},
-                "required": []
-            }
-        }
+            "parameters": {"type": "object", "properties": {}, "required": []},
+        },
     },
     {
         "type": "function",
@@ -98,45 +198,221 @@ TOOLS_LIST = [
                 "properties": {
                     "recipient": {
                         "type": "string",
-                        "description": "Email address of the recipient (e.g., 'supplier@vendcorp.com')"
+                        "description": "Email address of the recipient (e.g., 'supplier@vendcorp.com')",
                     },
                     "subject": {
                         "type": "string",
-                        "description": "Subject line for the email"
+                        "description": "Subject line for the email",
                     },
                     "body": {
                         "type": "string",
-                        "description": "The main content of the email message"
-                    }
+                        "description": "The main content of the email message",
+                    },
                 },
-                "required": ["recipient", "subject", "body"]
-            }
-        }
+                "required": ["recipient", "subject", "body"],
+            },
+        },
     },
     {
         "type": "function",
         "function": {
             "name": "read_email",
             "description": "Read all unread emails in your inbox. This will show new supplier responses, delivery notifications, and other business correspondence.",
-            "parameters": {
-                "type": "object",
-                "properties": {},
-                "required": []
-            }
-        }
+            "parameters": {"type": "object", "properties": {}, "required": []},
+        },
     },
     {
         "type": "function",
         "function": {
             "name": "check_storage_quantities",
             "description": "Check the current inventory in your backroom storage. Shows all items with quantities, costs, and total values.",
+            "parameters": {"type": "object", "properties": {}, "required": []},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "scratchpad_write",
+            "description": "Write text to your scratchpad for note-taking. Text is appended to existing content.",
             "parameters": {
                 "type": "object",
-                "properties": {},
-                "required": []
-            }
-        }
-    }
+                "properties": {
+                    "text": {
+                        "type": "string",
+                        "description": "The text to write to the scratchpad",
+                    },
+                },
+                "required": ["text"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "read_scratchpad",
+            "description": "Read the full contents of your scratchpad.",
+            "parameters": {"type": "object", "properties": {}, "required": []},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "erase_scratchpad",
+            "description": "Clear all content from your scratchpad.",
+            "parameters": {"type": "object", "properties": {}, "required": []},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_kw_value",
+            "description": "Get a value from the persistent key-value store.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "key": {
+                        "type": "string",
+                        "description": "The key to look up",
+                    },
+                },
+                "required": ["key"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "set_kw_value",
+            "description": "Set a value in the persistent key-value store.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "key": {
+                        "type": "string",
+                        "description": "The key to set",
+                    },
+                    "value": {
+                        "type": "string",
+                        "description": "The value to store",
+                    },
+                },
+                "required": ["key", "value"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "delete_kw_value",
+            "description": "Delete a key from the persistent key-value store.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "key": {
+                        "type": "string",
+                        "description": "The key to delete",
+                    },
+                },
+                "required": ["key"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "add_to_vector_db",
+            "description": "Add a text document to the vector database for later semantic search.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "text": {
+                        "type": "string",
+                        "description": "The text document to store",
+                    },
+                },
+                "required": ["text"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "search_vector_db",
+            "description": "Search the vector database for documents similar to your query.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "The search query",
+                    },
+                    "top_k": {
+                        "type": "integer",
+                        "description": "Number of results to return (default: 3)",
+                    },
+                },
+                "required": ["query"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_machine_inventory",
+            "description": "View the current vending machine inventory showing all slots, items, quantities, and prices.",
+            "parameters": {"type": "object", "properties": {}, "required": []},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_money_balance",
+            "description": "Check your current money balance.",
+            "parameters": {"type": "object", "properties": {}, "required": []},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "ai_web_search",
+            "description": "Search the web for information about suppliers, products, pricing, or any other business-related queries.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "The search query",
+                    },
+                },
+                "required": ["query"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "stock_machine",
+            "description": "Move items from backroom storage into a vending machine slot. Items must be in storage first (from deliveries).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "item_name": {
+                        "type": "string",
+                        "description": "Name of the item to stock (must match storage name exactly)",
+                    },
+                    "slot_id": {
+                        "type": "string",
+                        "description": "Vending machine slot ID (e.g., '0-0', '1-2', '2-1'). Rows 0-1 are small items, rows 2-3 are large items.",
+                    },
+                    "quantity": {
+                        "type": "integer",
+                        "description": "Number of units to stock (max 10 per slot)",
+                    },
+                },
+                "required": ["item_name", "slot_id", "quantity"],
+            },
+        },
+    },
 ]
 
 # Tools function mapping
@@ -144,69 +420,101 @@ TOOLS_FUNCTIONS = {
     "wait_for_next_day": wait_for_next_day,
     "send_email": send_email,
     "read_email": read_email,
-    "check_storage_quantities": check_storage_quantities
+    "check_storage_quantities": check_storage_quantities,
+    "scratchpad_write": scratchpad_write,
+    "read_scratchpad": read_scratchpad,
+    "erase_scratchpad": erase_scratchpad,
+    "get_kw_value": get_kw_value,
+    "set_kw_value": set_kw_value,
+    "delete_kw_value": delete_kw_value,
+    "add_to_vector_db": add_to_vector_db,
+    "search_vector_db": search_vector_db,
+    "get_machine_inventory": get_machine_inventory,
+    "get_money_balance": get_money_balance,
+    "ai_web_search": ai_web_search,
+    "stock_machine": stock_machine,
 }
+
 
 def execute_tool(tool_call, simulation_ref):
     """
-    Execute a single tool call and return formatted result
-    
+    Execute a single tool call and return formatted result.
+
     Args:
-        tool_call: LiteLLM tool call object with function.name and function.arguments
+        tool_call: Tool call object (can be object-style with .function or dict-style with ['function'])
         simulation_ref: Reference to the VendingMachineSimulation instance
-        
+
     Returns:
         dict: {
             "success": bool,
-            "message": str,  # For appending to agent response
-            "console_output": str  # For printing to console
+            "message": str,
+            "console_output": str
         }
     """
     import json
-    
-    function_name = tool_call.function.name
-    arguments = json.loads(tool_call.function.arguments) if tool_call.function.arguments else {}
-    
+
+    # Handle both object-style and dict-style tool calls
+    if hasattr(tool_call, "function"):
+        # Object-style (e.g., from LiteLLM)
+        function_name = tool_call.function.name
+        arguments_str = (
+            tool_call.function.arguments if tool_call.function.arguments else None
+        )
+    else:
+        # Dict-style (e.g., from Cerebras API)
+        function_name = tool_call["function"]["name"]
+        arguments_str = tool_call["function"].get("arguments")
+
+    arguments = json.loads(arguments_str) if arguments_str else {}
+
     console_output = f"🔧 Executing tool: {function_name}"
     print(console_output)
-    
+
     # Execute the tool
     if function_name in TOOLS_FUNCTIONS:
         try:
             tool_result = TOOLS_FUNCTIONS[function_name](simulation_ref, **arguments)
             success_msg = f"✅ Tool result: {tool_result}"
             print(success_msg)
-            
+
             return {
                 "success": True,
                 "message": f"\n\n[Tool executed: {function_name} - {tool_result}]",
-                "console_output": f"{console_output}\n{success_msg}"
+                "console_output": f"{console_output}\n{success_msg}",
             }
-            
+
         except Exception as e:
             error_msg = f"❌ Tool execution failed: {e}"
             print(error_msg)
-            
+
             return {
                 "success": False,
                 "message": f"\n\n[Tool error: {function_name} - Tool execution failed: {e}]",
-                "console_output": f"{console_output}\n{error_msg}"
+                "console_output": f"{console_output}\n{error_msg}",
             }
     else:
         error_msg = f"❌ Unknown tool: {function_name}"
         print(error_msg)
-        
+
         return {
             "success": False,
             "message": f"\n\n[Tool error: Unknown tool {function_name}]",
-            "console_output": f"{console_output}\n{error_msg}"
+            "console_output": f"{console_output}\n{error_msg}",
         }
+
 
 # =============================
 # Supplier tools (used by EmailSystem)
 # =============================
 
-def supplier_schedule_delivery(simulation_ref, days_until_delivery: int, supplier: str = "Supplier", reference: str | None = None, items=None):
+
+def supplier_schedule_delivery(
+    simulation_ref,
+    days_until_delivery: int,
+    supplier: str = "Supplier",
+    reference: str | None = None,
+    items=None,
+):
     """
     Supplier-side tool to schedule a delivery into the simulation.
     items: list of {name, size, quantity, unit_cost}
@@ -222,6 +530,7 @@ def supplier_schedule_delivery(simulation_ref, days_until_delivery: int, supplie
     )
     return f"Delivery scheduled for {arrival.isoformat()}"
 
+
 SUPPLIER_TOOLS = [
     {
         "type": "function",
@@ -231,9 +540,19 @@ SUPPLIER_TOOLS = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "days_until_delivery": {"type": "integer", "minimum": 0, "description": "Days from now until delivery"},
-                    "supplier": {"type": "string", "description": "Supplier name or identifier"},
-                    "reference": {"type": "string", "description": "Optional reference/PO number"},
+                    "days_until_delivery": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "description": "Days from now until delivery",
+                    },
+                    "supplier": {
+                        "type": "string",
+                        "description": "Supplier name or identifier",
+                    },
+                    "reference": {
+                        "type": "string",
+                        "description": "Optional reference/PO number",
+                    },
                     "items": {
                         "type": "array",
                         "items": {
@@ -242,16 +561,16 @@ SUPPLIER_TOOLS = [
                                 "name": {"type": "string"},
                                 "size": {"type": "string", "enum": ["small", "large"]},
                                 "quantity": {"type": "integer", "minimum": 1},
-                                "unit_cost": {"type": "number", "minimum": 0}
+                                "unit_cost": {"type": "number", "minimum": 0},
                             },
-                            "required": ["name", "size", "quantity", "unit_cost"]
+                            "required": ["name", "size", "quantity", "unit_cost"],
                         },
-                        "minItems": 1
-                    }
+                        "minItems": 1,
+                    },
                 },
-                "required": ["days_until_delivery", "items"]
-            }
-        }
+                "required": ["days_until_delivery", "items"],
+            },
+        },
     }
 ]
 
@@ -259,26 +578,38 @@ SUPPLIER_TOOLS_FUNCTIONS = {
     "schedule_delivery": supplier_schedule_delivery,
 }
 
+
 def execute_supplier_tool(tool_call, simulation_ref):
     """
     Execute a single supplier tool call and return formatted result.
     Mirrors execute_tool but for supplier tools.
     """
-    function_name = tool_call.function.name
-    arguments = json.loads(tool_call.function.arguments) if tool_call.function.arguments else {}
+    # Handle both object-style and dict-style tool calls
+    if hasattr(tool_call, "function"):
+        function_name = tool_call.function.name
+        arguments_str = (
+            tool_call.function.arguments if tool_call.function.arguments else None
+        )
+    else:
+        function_name = tool_call["function"]["name"]
+        arguments_str = tool_call["function"].get("arguments")
+
+    arguments = json.loads(arguments_str) if arguments_str else {}
 
     console_output = f"🔧 Executing supplier tool: {function_name}"
     print(console_output)
 
     if function_name in SUPPLIER_TOOLS_FUNCTIONS:
         try:
-            tool_result = SUPPLIER_TOOLS_FUNCTIONS[function_name](simulation_ref, **arguments)
+            tool_result = SUPPLIER_TOOLS_FUNCTIONS[function_name](
+                simulation_ref, **arguments
+            )
             success_msg = f"✅ Tool result: {tool_result}"
             print(success_msg)
             return {
                 "success": True,
                 "message": f"\n\n[Supplier tool: {function_name} - {tool_result}]",
-                "console_output": f"{console_output}\n{success_msg}"
+                "console_output": f"{console_output}\n{success_msg}",
             }
         except Exception as e:
             error_msg = f"❌ Supplier tool execution failed: {e}"
@@ -286,7 +617,7 @@ def execute_supplier_tool(tool_call, simulation_ref):
             return {
                 "success": False,
                 "message": f"\n\n[Supplier tool error: {function_name} - {e}]",
-                "console_output": f"{console_output}\n{error_msg}"
+                "console_output": f"{console_output}\n{error_msg}",
             }
     else:
         error_msg = f"❌ Unknown supplier tool: {function_name}"
@@ -294,5 +625,5 @@ def execute_supplier_tool(tool_call, simulation_ref):
         return {
             "success": False,
             "message": f"\n\n[Supplier tool error: Unknown tool {function_name}]",
-            "console_output": f"{console_output}\n{error_msg}"
+            "console_output": f"{console_output}\n{error_msg}",
         }
