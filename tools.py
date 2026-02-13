@@ -1,5 +1,15 @@
 """
-This file contains the tools that the primary agent can use to take actions.
+Tools module for the autonomous vending‑machine simulation.
+
+This module defines all agent‑accessible functions (tool calls) such as:
+- Advancing the simulation day (`wait_for_next_day`).
+- Communicating with suppliers (`send_email`, `read_email`).
+- Inspecting storage and the vending‑machine slots.
+- Managing a simple key‑value store and a vector‑DB.
+- Performing a web search via the Perplexity API.
+- Stocking items into specific machine slots.
+
+Each function includes a concise docstring (triple‑quoted string) that explains its purpose, arguments, return value, and any side‑effects.  The `TOOLS_LIST` dictionary at the bottom of the file is used by the LLM for function‑calling.
 """
 
 from datetime import datetime, timedelta
@@ -7,14 +17,16 @@ import json
 
 
 def wait_for_next_day(simulation_ref):
-    """
-    Advance simulation time to 6:00 AM of the next day
+    """Advance the simulation to the next day at 06:00.
+
+    The function updates the internal clock, triggers daily fees, weather changes,
+    and returns a human‑readable confirmation string.
 
     Args:
-        simulation_ref: Reference to the VendingMachineSimulation instance
+        simulation_ref: The active ``VendingMachineSimulation`` instance.
 
     Returns:
-        dict: Result containing success status and new day information
+        str: Confirmation message with the new datetime.
     """
     # Get current time from simulation
     current_time = simulation_ref.get_current_time()
@@ -124,7 +136,7 @@ def get_machine_inventory(simulation_ref):
     slots = simulation_ref.vending_machine.get_slots()
     lines = ["VENDING MACHINE INVENTORY", "=" * 40]
     for slot_id, slot in slots.items():
-        if slot['item']:
+        if slot["item"]:
             lines.append(
                 f"  Slot {slot_id} [{slot['size_type']}]: "
                 f"{slot['item'].name} x{slot['quantity']} @ ${slot['item'].price:.2f}"
@@ -144,6 +156,7 @@ def get_money_balance(simulation_ref):
 def ai_web_search(simulation_ref, query):
     """Search the web using Perplexity API"""
     from search import search_perplexity
+
     content, error = search_perplexity(query)
     if error:
         return f"Search failed: {error}"

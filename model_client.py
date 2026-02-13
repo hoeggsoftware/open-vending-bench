@@ -141,6 +141,9 @@ def call_model_litellm(
         }
 
 
+from typing import Union
+
+
 def call_cerebras_model(
     prompt: str,
     system_prompt: str = "",
@@ -148,7 +151,7 @@ def call_cerebras_model(
     max_tokens: int = 1000,
     temperature: float = 0.7,
     tools: Optional[list] = None,
-) -> dict:
+) -> Union[str, dict]:
     """Call a Cerebras model via the official SDK (or fallback to raw HTTP).
 
     Args:
@@ -208,20 +211,27 @@ def call_cerebras_model(
             completion_kwargs["tools"] = tools
         response = client.chat.completions.create(**completion_kwargs)
 
+        # Process the SDK response (or lack thereof)
         if response is None:
-            return {
-                "content": "[Mock Cerebras response – SDK not available]",
-                "tool_calls": None,
-            }
+            # No SDK response – treat as mock content.
+            content = "[Mock Cerebras response – SDK not available]"
+        else:
+            message = response.choices[0].message
+            content = getattr(message, "content", "") or ""
+            tool_calls = getattr(message, "tool_calls", None)
 
-        message = response.choices[0].message
-        content = getattr(message, "content", "") or ""
-        tool_calls = getattr(message, "tool_calls", None)
+            if tool_calls and len(tool_calls) > 1:
+                tool_calls = [tool_calls[0]]
 
-        if tool_calls and len(tool_calls) > 1:
-            tool_calls = [tool_calls[0]]
+            # When the caller does not request tool support, return just the content string.
+            if tools is None:
+                return content
+            return {"content": content, "tool_calls": tool_calls}
 
-        return {"content": content, "tool_calls": tool_calls}
+        # If we reach here we are returning a mock response because the SDK gave None.
+        if tools is None:
+            return content
+        return {"content": content, "tool_calls": None}
     except Exception as e:
         # Fallback to raw HTTP
         import json, requests
@@ -268,20 +278,20 @@ def call_model(
     system_prompt: str = "",
     tools: list = None,
 ):
-    """
-    Universal model client using LiteLLM for unified interface
+    """Universal model client using LiteLLM for a unified interface.
 
     Args:
-        prompt: The text prompt to send to the model
-        model_type: Which model to use ("claude", "gpt-4", "gpt-3.5", etc.)
-        system_prompt: System prompt for the model
-        tools: List of tool schemas for function calling
+        prompt: The text prompt to send to the model.
+        model_type: Identifier for the model (e.g., "claude", "gpt-4", "cerebras").
+        system_prompt: Optional system message.
+        tools: Optional list of tool schemas for function calling.
 
     Returns:
-        str if no tools provided, dict with content and tool_calls if tools provided
+        A dict ``{"content": <str>, "tool_calls": <list|None>}`` – even when no tools are
+        requested – to keep the return type consistent across all back‑ends.
     """
 
-    # Map common model types to LiteLLM identifiers
+    # Map common model shortcuts to their Litellm identifiers.
     model_mapping = {
         "claude-4-opus": "anthropic/claude-opus-4-20250514",
         "claude-4-sonnet": "anthropic/claude-sonnet-4-20250514",
@@ -296,21 +306,25 @@ def call_model(
         "cerebras-gpt-oss-120b": "cerebras/gpt-oss-120b",
     }
 
-    # Use mapped model or the provided model_type directly
     litellm_model = model_mapping.get(model_type.lower(), model_type)
 
     try:
-        # If the model is a Cerebras model, route directly to the Cerebras wrapper.
+        # Route Cerebras models through the dedicated wrapper.
         if "cerebras" in litellm_model.lower():
             model_name = (
                 litellm_model.split("/", 1)[1]
                 if "/" in litellm_model
                 else "gpt-oss-120b"
             )
-            return call_cerebras_model(
+            result = call_cerebras_model(
                 prompt, system_prompt=system_prompt, model_name=model_name, tools=tools
             )
-        # Otherwise, use Litellm (fallback handled inside that function)
+            # ``call_cerebras_model`` may return a plain string when no tools are provided.
+            # Normalize to the dict format expected by the rest of the code and tests.
+            if isinstance(result, str):
+                return {"content": result, "tool_calls": None}
+            return result
+        # All other models go via Litellm.
         result = call_model_litellm(prompt, litellm_model, system_prompt, tools)
         return result
     except Exception as e:

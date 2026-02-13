@@ -3,17 +3,18 @@ from datetime import datetime
 
 
 class SimulationDatabase:
+    # Optional back‑reference to the simulation (set by main_simulation)
+    simulation = None
+
     def __init__(self, db_path="vending_simulation.db"):
         self.db_path = db_path
         self.conn = sqlite3.connect(db_path)
         self.create_tables()
 
     def create_tables(self):
-        """Create simulation tracking tables"""
+        """Create all simulation tracking tables (one statement per execute)."""
         cursor = self.conn.cursor()
-
-        # Main simulation state table (balance tracking)
-        # Additional tables for detailed logging
+        # logs
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS logs (
                 log_id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -24,6 +25,7 @@ class SimulationDatabase:
                 tool_calls TEXT
             )
         """)
+        # emails
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS emails (
                 timestamp TEXT NOT NULL,
@@ -37,6 +39,7 @@ class SimulationDatabase:
                 PRIMARY KEY (timestamp, simulation_id, email_id)
             )
         """)
+        # inventory
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS inventory (
                 timestamp TEXT NOT NULL,
@@ -47,6 +50,7 @@ class SimulationDatabase:
                 PRIMARY KEY (timestamp, simulation_id, item)
             )
         """)
+        # sales
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS sales (
                 timestamp TEXT NOT NULL,
@@ -57,6 +61,7 @@ class SimulationDatabase:
                 PRIMARY KEY (timestamp, simulation_id, product)
             )
         """)
+        # time_progress
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS time_progress (
                 day_number INTEGER NOT NULL,
@@ -66,6 +71,7 @@ class SimulationDatabase:
                 PRIMARY KEY (day_number, simulation_id)
             )
         """)
+        # weather
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS weather (
                 day_number INTEGER NOT NULL,
@@ -75,13 +81,17 @@ class SimulationDatabase:
                 PRIMARY KEY (day_number, simulation_id)
             )
         """)
+        # simulation_state
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS simulation_state (
                 timestamp TEXT NOT NULL,
                 simulation_id TEXT NOT NULL,
                 balance REAL NOT NULL,
                 PRIMARY KEY (timestamp, simulation_id)
-            );
+            )
+        """)
+        # machine_slots
+        cursor.execute("""
             CREATE TABLE IF NOT EXISTS machine_slots (
                 slot_id TEXT NOT NULL,
                 simulation_id TEXT NOT NULL,
@@ -89,8 +99,8 @@ class SimulationDatabase:
                 quantity INTEGER,
                 size_type TEXT,
                 PRIMARY KEY (slot_id, simulation_id)
-            )        """)
-
+            )
+        """)
         self.conn.commit()
 
     def log_state(self, simulation_id, timestamp, balance, day_number=None):
@@ -110,11 +120,11 @@ class SimulationDatabase:
                 (day_number, timestamp.isoformat(), simulation_id, None),
             )
         # Persist current vending‑machine slot states (if simulation holds a reference to the machine)
-        if hasattr(self, 'simulation') and hasattr(self.simulation, 'vending_machine'):
+        if hasattr(self, "simulation") and hasattr(self.simulation, "vending_machine"):
             for slot_id, slot in self.simulation.vending_machine.get_slots().items():
-                item_name = slot['item'].name if slot['item'] else None
-                qty = slot['quantity']
-                size = slot['size_type']
+                item_name = slot["item"].name if slot["item"] else None
+                qty = slot["quantity"]
+                size = slot["size_type"]
                 cursor.execute(
                     """
                     INSERT OR REPLACE INTO machine_slots (slot_id, simulation_id, item, quantity, size_type)
@@ -122,22 +132,6 @@ class SimulationDatabase:
                     """,
                     (slot_id, simulation_id, item_name, qty, size),
                 )
-        self.conn.commit()        """Log current simulation state (balance, optional day number)"""
-        cursor = self.conn.cursor()
-        cursor.execute(
-            """
-            INSERT OR REPLACE INTO simulation_state (timestamp, simulation_id, balance)
-            VALUES (?, ?, ?)
-            """,
-            (timestamp.isoformat(), simulation_id, balance),
-        )
-        # Optional time/day tracking
-        if day_number is not None:
-            cursor.execute(
-                "INSERT OR REPLACE INTO time_progress (day_number, timestamp, simulation_id, weather) VALUES (?, ?, ?, ?)",
-                (day_number, timestamp.isoformat(), simulation_id, None),
-            )
-        self.conn.commit()
 
     def log_message(self, simulation_id, timestamp, prompt, response, tool_calls=None):
         """Store an agent interaction (prompt, response, tool calls)."""
