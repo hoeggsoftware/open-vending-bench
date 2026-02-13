@@ -42,16 +42,19 @@ def email_summary(conn):
 
 def storage_report(conn):
     print("--- Back‑room storage ---")
-    cur = conn.execute("SELECT item, quantity, avg_unit_cost FROM inventory")
+    cur = conn.execute("SELECT item, quantity FROM inventory")
     rows = cur.fetchall()
     if not rows:
         print("Storage is empty.")
     else:
         total_value = 0.0
-        for item, qty, cost in rows:
-            value = qty * cost
-            total_value += value
-            print(f"{item:20} qty={qty:<4} unit_cost=${cost:.2f}  value=${value:.2f}")
+        for item, qty in rows:
+            # No unit cost stored; just report quantity.
+            print(f"{item:20} qty={qty:<4}")
+            # If you ever add cost tracking, uncomment the following lines:
+            # value = qty * cost
+            # total_value += value
+            # print(f"{item:20} qty={qty:<4} unit_cost=${cost:.2f}  value=${value:.2f}")
         print(f"Total storage value: ${total_value:.2f}")
     print()
 
