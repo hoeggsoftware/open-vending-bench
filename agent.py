@@ -51,6 +51,7 @@ class VendingMachineAgent:
         name: str = "VendingBot",
         max_context_tokens: int = 30000,
         simulation_ref=None,
+        system_prompt=None,
     ):
         self.name = name
         self.conversation_history: List[Dict[str, str]] = []
@@ -58,6 +59,9 @@ class VendingMachineAgent:
         self.max_context_tokens = max_context_tokens
         self.simulation = simulation_ref  # Reference to parent simulation
         self.last_6am_time = None  # Track last 6 AM timestamp we processed
+
+        # Store custom system prompt, defaulting to the module-level SYSTEM_PROMPT
+        self.system_prompt = system_prompt if system_prompt is not None else SYSTEM_PROMPT
 
         # Sliding window for context management
         self.context_window: deque = deque()
@@ -199,7 +203,7 @@ class VendingMachineAgent:
         self,
         context: str = "",
         loop_prompt: str = LOOP_PROMPT,
-        system_prompt: str = SYSTEM_PROMPT,
+        system_prompt: str = None,
     ) -> str:
         """
         Run the agent with given context and prompt
@@ -207,11 +211,15 @@ class VendingMachineAgent:
         Args:
             context: Additional context to provide to the agent
             loop_prompt: The prompt to send (defaults to standard loop prompt)
-            system_prompt: System prompt to provide instructions to the agent
+            system_prompt: System prompt to provide instructions to the agent (defaults to self.system_prompt)
 
         Returns:
             The agent's response
         """
+        # Use instance system prompt if none provided
+        if system_prompt is None:
+            system_prompt = self.system_prompt
+
         # Check if it's 6 AM and handle daily processing
         if self.simulation and self.is_new_day_at_6am():
             # New day processing - delegate to simulation for business logic

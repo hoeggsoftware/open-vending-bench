@@ -6,10 +6,11 @@ import os
 
 
 class KVStore:
-    def __init__(self, persist_path: str = "kv_store.json"):
+    def __init__(self, persist_path: str = "kv_store.json", skip_file_load: bool = False):
         self.persist_path = persist_path
         self.data = {}
-        self._load()
+        if not skip_file_load:
+            self._load()
 
     def _load(self):
         if os.path.exists(self.persist_path):

@@ -101,6 +101,111 @@ class SimulationDatabase:
                 PRIMARY KEY (slot_id, simulation_id)
             )
         """)
+
+        # day_snapshot - Core state at each day boundary
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS day_snapshot (
+                day_number INTEGER NOT NULL,
+                simulation_id TEXT NOT NULL,
+                timestamp TEXT NOT NULL,
+                balance REAL NOT NULL,
+                message_count INTEGER NOT NULL,
+                days_passed INTEGER NOT NULL,
+                current_weather TEXT NOT NULL,
+                current_month INTEGER NOT NULL,
+                current_day INTEGER NOT NULL,
+                current_year INTEGER NOT NULL,
+                last_sales_total REAL NOT NULL DEFAULT 0.0,
+                phase TEXT NOT NULL DEFAULT '',
+                PRIMARY KEY (day_number, simulation_id)
+            )
+        """)
+
+        # day_snapshot_machine_slots - Full vending machine state
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS day_snapshot_machine_slots (
+                day_number INTEGER NOT NULL,
+                simulation_id TEXT NOT NULL,
+                slot_id TEXT NOT NULL,
+                item_name TEXT,
+                item_size TEXT,
+                quantity INTEGER NOT NULL DEFAULT 0,
+                price REAL,
+                cost REAL,
+                PRIMARY KEY (day_number, simulation_id, slot_id)
+            )
+        """)
+
+        # day_snapshot_backroom - Backroom storage inventory
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS day_snapshot_backroom (
+                day_number INTEGER NOT NULL,
+                simulation_id TEXT NOT NULL,
+                item_name TEXT NOT NULL,
+                item_size TEXT NOT NULL,
+                quantity INTEGER NOT NULL,
+                avg_unit_cost REAL NOT NULL,
+                selling_price REAL NOT NULL DEFAULT 0.0,
+                PRIMARY KEY (day_number, simulation_id, item_name)
+            )
+        """)
+
+        # day_snapshot_pending_deliveries - Ordered but undelivered shipments
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS day_snapshot_pending_deliveries (
+                day_number INTEGER NOT NULL,
+                simulation_id TEXT NOT NULL,
+                delivery_index INTEGER NOT NULL,
+                arrival_time TEXT NOT NULL,
+                supplier TEXT,
+                items_json TEXT NOT NULL,
+                reference TEXT,
+                PRIMARY KEY (day_number, simulation_id, delivery_index)
+            )
+        """)
+
+        # day_snapshot_scratchpad - Agent's scratchpad text
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS day_snapshot_scratchpad (
+                day_number INTEGER NOT NULL,
+                simulation_id TEXT NOT NULL,
+                content TEXT NOT NULL DEFAULT '',
+                PRIMARY KEY (day_number, simulation_id)
+            )
+        """)
+
+        # day_snapshot_kv_store - Key-value store as JSON blob
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS day_snapshot_kv_store (
+                day_number INTEGER NOT NULL,
+                simulation_id TEXT NOT NULL,
+                data_json TEXT NOT NULL DEFAULT '{}',
+                PRIMARY KEY (day_number, simulation_id)
+            )
+        """)
+
+        # day_snapshot_vector_db - Vector DB documents as JSON
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS day_snapshot_vector_db (
+                day_number INTEGER NOT NULL,
+                simulation_id TEXT NOT NULL,
+                documents_json TEXT NOT NULL DEFAULT '[]',
+                next_id INTEGER NOT NULL DEFAULT 0,
+                PRIMARY KEY (day_number, simulation_id)
+            )
+        """)
+
+        # day_snapshot_recipient_profiles - Cached supplier profile data
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS day_snapshot_recipient_profiles (
+                day_number INTEGER NOT NULL,
+                simulation_id TEXT NOT NULL,
+                email_address TEXT NOT NULL,
+                profile_text TEXT NOT NULL,
+                PRIMARY KEY (day_number, simulation_id, email_address)
+            )
+        """)
+
         self.conn.commit()
 
     def log_state(self, simulation_id, timestamp, balance, day_number=None):
@@ -224,6 +329,149 @@ class SimulationDatabase:
         """,
             (day_number, timestamp.isoformat(), simulation_id, condition),
         )
+        self.conn.commit()
+
+    def log_day_snapshot(self, simulation):
+        """
+        Capture complete business state at a day boundary.
+        Called at the end of handle_new_day() after all daily processing.
+        """
+        import json
+
+        cursor = self.conn.cursor()
+        day_number = simulation.days_passed
+        simulation_id = simulation.simulation_id
+
+        # 1. Core state snapshot
+        cursor.execute(
+            """
+            INSERT OR REPLACE INTO day_snapshot
+            (day_number, simulation_id, timestamp, balance, message_count, days_passed,
+             current_weather, current_month, current_day, current_year, last_sales_total, phase)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                day_number,
+                simulation_id,
+                simulation.current_time.isoformat(),
+                simulation.balance,
+                simulation.message_count,
+                simulation.days_passed,
+                simulation.current_weather,
+                simulation.current_time.month,
+                simulation.current_time.day,
+                simulation.current_time.year,
+                simulation.last_sales_total,
+                "",  # phase defaults to empty string
+            ),
+        )
+
+        # 2. Machine slots snapshot
+        for slot_id, slot in simulation.vending_machine.get_slots().items():
+            item_name = slot["item"].name if slot["item"] else None
+            item_size = slot["item"].size if slot["item"] else None
+            quantity = slot["quantity"]
+            price = slot["item"].price if slot["item"] else None
+            cost = slot["item"].cost if slot["item"] else None
+
+            cursor.execute(
+                """
+                INSERT OR REPLACE INTO day_snapshot_machine_slots
+                (day_number, simulation_id, slot_id, item_name, item_size, quantity, price, cost)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (day_number, simulation_id, slot_id, item_name, item_size, quantity, price, cost),
+            )
+
+        # 3. Backroom inventory snapshot
+        for item_name, record in simulation.storage.items.items():
+            cursor.execute(
+                """
+                INSERT OR REPLACE INTO day_snapshot_backroom
+                (day_number, simulation_id, item_name, item_size, quantity, avg_unit_cost, selling_price)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    day_number,
+                    simulation_id,
+                    item_name,
+                    record["item"].size,
+                    record["quantity"],
+                    record["avg_unit_cost"],
+                    record["item"].price,
+                ),
+            )
+
+        # 4. Pending deliveries snapshot
+        for delivery_index, delivery in enumerate(simulation.storage.pending_deliveries):
+            cursor.execute(
+                """
+                INSERT OR REPLACE INTO day_snapshot_pending_deliveries
+                (day_number, simulation_id, delivery_index, arrival_time, supplier, items_json, reference)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    day_number,
+                    simulation_id,
+                    delivery_index,
+                    delivery["arrival_time"].isoformat(),
+                    delivery.get("supplier"),
+                    json.dumps(delivery["items"]),
+                    delivery.get("reference"),
+                ),
+            )
+
+        # 5. Scratchpad snapshot
+        cursor.execute(
+            """
+            INSERT OR REPLACE INTO day_snapshot_scratchpad
+            (day_number, simulation_id, content)
+            VALUES (?, ?, ?)
+            """,
+            (day_number, simulation_id, simulation.scratchpad.content),
+        )
+
+        # 6. KV store snapshot
+        cursor.execute(
+            """
+            INSERT OR REPLACE INTO day_snapshot_kv_store
+            (day_number, simulation_id, data_json)
+            VALUES (?, ?, ?)
+            """,
+            (day_number, simulation_id, json.dumps(simulation.kv_store.data)),
+        )
+
+        # 7. Vector DB snapshot
+        documents_data = [
+            {"id": doc["id"], "text": doc["text"]}
+            for doc in simulation.vector_db.documents
+        ]
+        cursor.execute(
+            """
+            INSERT OR REPLACE INTO day_snapshot_vector_db
+            (day_number, simulation_id, documents_json, next_id)
+            VALUES (?, ?, ?, ?)
+            """,
+            (
+                day_number,
+                simulation_id,
+                json.dumps(documents_data),
+                simulation.vector_db.next_id,
+            ),
+        )
+
+        # 8. Recipient profiles snapshot
+        for email_address, profile_text in simulation.email_system.recipient_profiles.items():
+            cursor.execute(
+                """
+                INSERT OR REPLACE INTO day_snapshot_recipient_profiles
+                (day_number, simulation_id, email_address, profile_text)
+                VALUES (?, ?, ?, ?)
+                """,
+                (day_number, simulation_id, email_address, profile_text),
+            )
+
+        # Commit all changes in a single transaction
         self.conn.commit()
 
     def get_simulation_history(self, simulation_id):

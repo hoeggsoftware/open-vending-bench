@@ -62,6 +62,48 @@ Examples:
         default=None,
         help="Override starting balance (default: $500)",
     )
+    parser.add_argument(
+        "--db-path",
+        type=str,
+        default=None,
+        help="Path to database file (for storing simulation state)",
+    )
+    parser.add_argument(
+        "--strategy-prompt",
+        type=str,
+        default=None,
+        help="Path to text file containing custom strategy/system prompt",
+    )
+    parser.add_argument(
+        "--playbook",
+        type=str,
+        default=None,
+        help="Path to text file containing playbook (loaded into KV store)",
+    )
+    parser.add_argument(
+        "--weather-seed",
+        type=int,
+        default=None,
+        help="Random seed for deterministic weather (for reproducible simulations)",
+    )
+    parser.add_argument(
+        "--start-date",
+        type=str,
+        default=None,
+        help="Simulation start date in YYYY-MM-DD format (e.g., 2026-07-01)",
+    )
+    parser.add_argument(
+        "--restore",
+        type=str,
+        default=None,
+        help="Path to existing database to restore simulation from",
+    )
+    parser.add_argument(
+        "--kv-persist-path",
+        type=str,
+        default=None,
+        help="Custom path for KV store persistence file (for contestant isolation)",
+    )
 
     args = parser.parse_args()
 
@@ -73,15 +115,52 @@ Examples:
         print(f"  Model: {args.model or 'default'}")
         print(f"  Store state: {store_state}")
         print(f"  Evaluate: {args.evaluate}")
+        if args.restore:
+            print(f"  Restore from: {args.restore}")
+        if args.db_path:
+            print(f"  Database path: {args.db_path}")
+        if args.start_date:
+            print(f"  Start date: {args.start_date}")
+        if args.weather_seed is not None:
+            print(f"  Weather seed: {args.weather_seed}")
         print()
 
-    simulation = VendingMachineSimulation(
-        store_state=store_state,
-        model_type=args.model,
-    )
+    # Load strategy prompt from file if provided
+    strategy_prompt = None
+    if args.strategy_prompt:
+        with open(args.strategy_prompt, 'r') as f:
+            strategy_prompt = f.read()
 
-    if args.starting_balance is not None:
-        simulation.balance = args.starting_balance
+    # Load playbook from file if provided
+    playbook = None
+    if args.playbook:
+        with open(args.playbook, 'r') as f:
+            playbook = f.read()
+
+    # Restore from database or create new simulation
+    if args.restore:
+        simulation = VendingMachineSimulation.from_database(
+            db_path=args.restore,
+            model_type=args.model,
+            store_state=store_state,
+            strategy_prompt=strategy_prompt,
+            playbook=playbook,
+            start_date=args.start_date,
+            weather_seed=args.weather_seed,
+            kv_persist_path=args.kv_persist_path,
+        )
+    else:
+        simulation = VendingMachineSimulation(
+            store_state=store_state,
+            model_type=args.model,
+            db_path=args.db_path,
+            starting_balance=args.starting_balance,
+            start_date=args.start_date,
+            weather_seed=args.weather_seed,
+            strategy_prompt=strategy_prompt,
+            playbook=playbook,
+            kv_persist_path=args.kv_persist_path,
+        )
 
     try:
         simulation.start_simulation(args.max_messages)
