@@ -227,6 +227,7 @@ Date: {email.timestamp.strftime("%Y-%m-%d %H:%M UTC")}
         # Get recent sent emails that need responses
         recent_sent = self.get_all_emails(mailbox="outbox")
 
+        emails_to_respond = []
         for sent_email in recent_sent:
             # Skip if we already have a response to this email
             if any(
@@ -234,6 +235,13 @@ Date: {email.timestamp.strftime("%Y-%m-%d %H:%M UTC")}
                 for email in self.inbox
             ):
                 continue
+            emails_to_respond.append(sent_email)
+
+        if emails_to_respond:
+            print(f"\n📧 Generating {len(emails_to_respond)} supplier response(s)...")
+
+        for i, sent_email in enumerate(emails_to_respond, 1):
+            print(f"   [{i}/{len(emails_to_respond)}] Response from {sent_email.recipient}...")
 
             # Get enhanced context for response (recipient + products information)
             response_context = self.get_response_context(
@@ -299,3 +307,6 @@ Keep the response realistic and business-like. Format as just the email body tex
                     body=fallback,
                     email_type="response",
                 )
+
+        if emails_to_respond:
+            print(f"✅ All supplier responses generated\n")

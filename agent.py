@@ -264,6 +264,11 @@ class VendingMachineAgent:
 
             # Append tool result message to response
             response_text += tool_result["message"]
+        elif model_result.get("content") and not tool_calls:
+            # Agent generated content but no valid tool calls
+            # This might indicate a truncation issue - add a note
+            if len(response_text) > 3000:  # Likely hit token limit
+                response_text += "\n\n[Note: Response may have been truncated. Consider simpler actions or fewer details.]"
 
         # Store the agent's response in history
         assistant_entry = {
