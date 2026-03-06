@@ -125,6 +125,25 @@ def call_model_litellm(
                 f"🔧 Multiple tool calls detected ({len(tool_calls)}), using first only"
             )
             tool_calls = [tool_calls[0]]
+
+        # Convert Pydantic tool_calls to dicts for JSON serialization
+        if tool_calls:
+            serializable_tool_calls = []
+            for tc in tool_calls:
+                if hasattr(tc, 'model_dump'):
+                    # Pydantic v2
+                    serializable_tool_calls.append(tc.model_dump())
+                elif hasattr(tc, 'dict'):
+                    # Pydantic v1
+                    serializable_tool_calls.append(tc.dict())
+                elif isinstance(tc, dict):
+                    # Already a dict
+                    serializable_tool_calls.append(tc)
+                else:
+                    # Fallback: convert object to dict
+                    serializable_tool_calls.append(vars(tc))
+            tool_calls = serializable_tool_calls
+
         return {"content": message.get("content", ""), "tool_calls": tool_calls}
     except Exception as e:
         # Provide a mock response for authentication errors to keep the simulation running
@@ -223,6 +242,24 @@ def call_cerebras_model(
             if tool_calls and len(tool_calls) > 1:
                 tool_calls = [tool_calls[0]]
 
+            # Convert Pydantic tool_calls to dicts for JSON serialization
+            if tool_calls:
+                serializable_tool_calls = []
+                for tc in tool_calls:
+                    if hasattr(tc, 'model_dump'):
+                        # Pydantic v2
+                        serializable_tool_calls.append(tc.model_dump())
+                    elif hasattr(tc, 'dict'):
+                        # Pydantic v1
+                        serializable_tool_calls.append(tc.dict())
+                    elif isinstance(tc, dict):
+                        # Already a dict
+                        serializable_tool_calls.append(tc)
+                    else:
+                        # Fallback: convert object to dict
+                        serializable_tool_calls.append(vars(tc))
+                tool_calls = serializable_tool_calls
+
             # When the caller does not request tool support, return just the content string.
             if tools is None:
                 return content
@@ -265,7 +302,7 @@ def call_cerebras_model(
                 tool_calls = [tool_calls[0]]
 
             return {"content": content, "tool_calls": tool_calls}
-        except Exception:
+        except Exception as e2:
             return {
                 "content": "[Mock Cerebras response – network unreachable]",
                 "tool_calls": None,

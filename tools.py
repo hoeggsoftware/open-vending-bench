@@ -486,7 +486,16 @@ def execute_tool(tool_call, simulation_ref):
     # Execute the tool
     if function_name in TOOLS_FUNCTIONS:
         try:
-            tool_result = TOOLS_FUNCTIONS[function_name](simulation_ref, **arguments)
+            # Filter arguments to only include parameters the function accepts
+            import inspect
+            func = TOOLS_FUNCTIONS[function_name]
+            sig = inspect.signature(func)
+            # Get parameter names (excluding simulation_ref which is always first)
+            accepted_params = [p for p in sig.parameters.keys() if p != 'simulation_ref']
+            # Filter arguments to only include accepted parameters
+            filtered_arguments = {k: v for k, v in arguments.items() if k in accepted_params}
+
+            tool_result = TOOLS_FUNCTIONS[function_name](simulation_ref, **filtered_arguments)
             success_msg = f"✅ Tool result: {tool_result}"
             print(success_msg)
 
