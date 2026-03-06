@@ -219,37 +219,20 @@ Date: {email.timestamp.strftime("%Y-%m-%d %H:%M UTC")}
 
     # Supplier tool execution moved to tools.py
 
-    def generate_supplier_responses(self, simulation_ref=None):
-        """Generate AI responses to recent outgoing emails using recipient profiles"""
+    def _generate_single_supplier_response(self, sent_email, simulation_ref, index, total):
+        """Generate a single supplier response (helper for parallelization)"""
         from model_client import call_model
         from tools import SUPPLIER_TOOLS, execute_supplier_tool
 
-        # Get recent sent emails that need responses
-        recent_sent = self.get_all_emails(mailbox="outbox")
+        print(f"   [{index}/{total}] Response from {sent_email.recipient}...")
 
-        emails_to_respond = []
-        for sent_email in recent_sent:
-            # Skip if we already have a response to this email
-            if any(
-                email.subject.startswith("Re:") and sent_email.subject in email.subject
-                for email in self.inbox
-            ):
-                continue
-            emails_to_respond.append(sent_email)
+        # Get enhanced context for response (recipient + products information)
+        response_context = self.get_response_context(
+            sent_email.recipient, sent_email.subject, sent_email.body
+        )
 
-        if emails_to_respond:
-            print(f"\n📧 Generating {len(emails_to_respond)} supplier response(s)...")
-
-        for i, sent_email in enumerate(emails_to_respond, 1):
-            print(f"   [{i}/{len(emails_to_respond)}] Response from {sent_email.recipient}...")
-
-            # Get enhanced context for response (recipient + products information)
-            response_context = self.get_response_context(
-                sent_email.recipient, sent_email.subject, sent_email.body
-            )
-
-            # Generate response using enhanced context
-            response_prompt = f"""You are {sent_email.recipient} responding to this business email inquiry.
+        # Generate response using enhanced context
+        response_prompt = f"""You are {sent_email.recipient} responding to this business email inquiry.
 
 SUPPLIER & PRODUCT CONTEXT:
 {response_context}
@@ -277,36 +260,78 @@ Only call the tool if the email includes sufficient details (product names, quan
 
 Keep the response realistic and business-like. Format as just the email body text."""
 
-            try:
-                # Allow supplier LLM to schedule deliveries via tool calls
-                response = call_model(response_prompt, tools=SUPPLIER_TOOLS)
+        try:
+            # Allow supplier LLM to schedule deliveries via tool calls
+            response = call_model(response_prompt, tools=SUPPLIER_TOOLS)
 
-                # If a tool call is present, execute the first one
-                tool_calls = response.get("tool_calls")
-                tool_msg = None
-                if tool_calls:
-                    tool_result = execute_supplier_tool(tool_calls[0], simulation_ref)
-                    tool_msg = tool_result.get("message")
+            # If a tool call is present, execute the first one
+            tool_calls = response.get("tool_calls")
+            tool_msg = None
+            if tool_calls:
+                tool_result = execute_supplier_tool(tool_calls[0], simulation_ref)
+                tool_msg = tool_result.get("message")
 
-                body_text = (response.get("content", "") or "").strip()
-                if tool_msg:
-                    body_text += tool_msg
+            body_text = (response.get("content", "") or "").strip()
+            if tool_msg:
+                body_text += tool_msg
 
-                self.receive_email(
-                    sender=sent_email.recipient,
-                    subject=f"Re: {sent_email.subject}",
-                    body=body_text,
-                    email_type="response",
+            self.receive_email(
+                sender=sent_email.recipient,
+                subject=f"Re: {sent_email.subject}",
+                body=body_text,
+                email_type="response",
+            )
+        except Exception as e:
+            # Fallback response if AI generation/tools fail
+            fallback = f"We acknowledge your inquiry and will follow up shortly. (Error: {e})"
+            self.receive_email(
+                sender=sent_email.recipient,
+                subject=f"Re: {sent_email.subject}",
+                body=fallback,
+                email_type="response",
+            )
+
+    def generate_supplier_responses(self, simulation_ref=None):
+        """Generate AI responses to recent outgoing emails using recipient profiles (parallelized)"""
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+
+        # Get recent sent emails that need responses
+        recent_sent = self.get_all_emails(mailbox="outbox")
+
+        emails_to_respond = []
+        for sent_email in recent_sent:
+            # Skip if we already have a response to this email
+            if any(
+                email.subject.startswith("Re:") and sent_email.subject in email.subject
+                for email in self.inbox
+            ):
+                continue
+            emails_to_respond.append(sent_email)
+
+        if not emails_to_respond:
+            return
+
+        print(f"\n📧 Generating {len(emails_to_respond)} supplier response(s) in parallel...")
+
+        # Generate all responses in parallel using ThreadPoolExecutor
+        with ThreadPoolExecutor(max_workers=min(5, len(emails_to_respond))) as executor:
+            # Submit all tasks
+            futures = [
+                executor.submit(
+                    self._generate_single_supplier_response,
+                    email,
+                    simulation_ref,
+                    i + 1,
+                    len(emails_to_respond)
                 )
-            except Exception as e:
-                # Fallback response if AI generation/tools fail
-                fallback = f"We acknowledge your inquiry and will follow up shortly. (Error: {e})"
-                self.receive_email(
-                    sender=sent_email.recipient,
-                    subject=f"Re: {sent_email.subject}",
-                    body=fallback,
-                    email_type="response",
-                )
+                for i, email in enumerate(emails_to_respond)
+            ]
 
-        if emails_to_respond:
-            print(f"✅ All supplier responses generated\n")
+            # Wait for all to complete
+            for future in as_completed(futures):
+                try:
+                    future.result()  # Raise any exceptions that occurred
+                except Exception as e:
+                    print(f"⚠️ Error generating supplier response: {e}")
+
+        print(f"✅ All supplier responses generated\n")
