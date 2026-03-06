@@ -128,21 +128,36 @@ def call_model_litellm(
 
         # Convert Pydantic tool_calls to dicts for JSON serialization
         if tool_calls:
+            import json
             serializable_tool_calls = []
             for tc in tool_calls:
+                # Convert to dict
                 if hasattr(tc, 'model_dump'):
                     # Pydantic v2
-                    serializable_tool_calls.append(tc.model_dump())
+                    tc_dict = tc.model_dump()
                 elif hasattr(tc, 'dict'):
                     # Pydantic v1
-                    serializable_tool_calls.append(tc.dict())
+                    tc_dict = tc.dict()
                 elif isinstance(tc, dict):
                     # Already a dict
-                    serializable_tool_calls.append(tc)
+                    tc_dict = tc
                 else:
                     # Fallback: convert object to dict
-                    serializable_tool_calls.append(vars(tc))
-            tool_calls = serializable_tool_calls
+                    tc_dict = vars(tc)
+
+                # Validate that arguments are valid JSON before including
+                if "function" in tc_dict and "arguments" in tc_dict["function"]:
+                    args_str = tc_dict["function"]["arguments"]
+                    try:
+                        json.loads(args_str) if args_str else {}
+                        serializable_tool_calls.append(tc_dict)
+                    except json.JSONDecodeError:
+                        print(f"⚠️ Skipping malformed tool call with invalid JSON arguments")
+                        continue
+                else:
+                    serializable_tool_calls.append(tc_dict)
+
+            tool_calls = serializable_tool_calls if serializable_tool_calls else None
 
         return {"content": message.get("content", ""), "tool_calls": tool_calls}
     except Exception as e:
@@ -244,21 +259,36 @@ def call_cerebras_model(
 
             # Convert Pydantic tool_calls to dicts for JSON serialization
             if tool_calls:
+                import json
                 serializable_tool_calls = []
                 for tc in tool_calls:
+                    # Convert to dict
                     if hasattr(tc, 'model_dump'):
                         # Pydantic v2
-                        serializable_tool_calls.append(tc.model_dump())
+                        tc_dict = tc.model_dump()
                     elif hasattr(tc, 'dict'):
                         # Pydantic v1
-                        serializable_tool_calls.append(tc.dict())
+                        tc_dict = tc.dict()
                     elif isinstance(tc, dict):
                         # Already a dict
-                        serializable_tool_calls.append(tc)
+                        tc_dict = tc
                     else:
                         # Fallback: convert object to dict
-                        serializable_tool_calls.append(vars(tc))
-                tool_calls = serializable_tool_calls
+                        tc_dict = vars(tc)
+
+                    # Validate that arguments are valid JSON before including
+                    if "function" in tc_dict and "arguments" in tc_dict["function"]:
+                        args_str = tc_dict["function"]["arguments"]
+                        try:
+                            json.loads(args_str) if args_str else {}
+                            serializable_tool_calls.append(tc_dict)
+                        except json.JSONDecodeError:
+                            print(f"⚠️ Skipping malformed tool call with invalid JSON arguments")
+                            continue
+                    else:
+                        serializable_tool_calls.append(tc_dict)
+
+                tool_calls = serializable_tool_calls if serializable_tool_calls else None
 
             # When the caller does not request tool support, return just the content string.
             if tools is None:

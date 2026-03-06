@@ -170,25 +170,49 @@ def stock_machine(simulation_ref, item_name, slot_id, quantity):
     vm = simulation_ref.vending_machine
     quantity = int(quantity)
 
-    # Check storage has the item
+    # Check storage has the item - try fuzzy matching
     item_obj = storage.get_item(item_name)
-    if item_obj is None:
-        return f"Item '{item_name}' not found in storage."
+    actual_name = item_name
 
-    available = storage.get_quantity(item_name)
+    if item_obj is None:
+        # Try case-insensitive match
+        available_items = storage.list_all_items()
+        for stored_name in available_items:
+            if stored_name.lower() == item_name.lower():
+                item_obj = storage.get_item(stored_name)
+                actual_name = stored_name
+                break
+
+        # Try partial match (item_name is substring of stored name)
+        if item_obj is None:
+            for stored_name in available_items:
+                if item_name.lower() in stored_name.lower():
+                    item_obj = storage.get_item(stored_name)
+                    actual_name = stored_name
+                    break
+
+        # Still no match - provide helpful error
+        if item_obj is None:
+            if available_items:
+                items_list = ", ".join(available_items[:5])
+                return f"Item '{item_name}' not found in storage. Available: {items_list}"
+            else:
+                return f"Item '{item_name}' not found. Storage is empty."
+
+    available = storage.get_quantity(actual_name)
     if available < quantity:
-        return f"Only {available} units of '{item_name}' in storage (requested {quantity})."
+        return f"Only {available} units of '{actual_name}' in storage (requested {quantity})."
 
     # Attempt to stock into vending machine
     if not vm.can_stock_item(slot_id, item_obj):
-        return f"Cannot stock '{item_name}' in slot {slot_id} (wrong size or different item already there)."
+        return f"Cannot stock '{actual_name}' in slot {slot_id} (wrong size or different item already there)."
 
     if not vm.stock_item(slot_id, item_obj, quantity):
         return f"Slot {slot_id} doesn't have enough capacity for {quantity} units."
 
     # Remove from storage
-    storage.remove_items(item_name, quantity)
-    return f"Stocked {quantity}x {item_name} into slot {slot_id}."
+    storage.remove_items(actual_name, quantity)
+    return f"Stocked {quantity}x {actual_name} into slot {slot_id}."
 
 
 # Tools schema for LiteLLM function calling
