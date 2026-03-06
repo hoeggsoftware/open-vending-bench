@@ -109,7 +109,7 @@ def call_model_litellm(
     completion_params = {
         "model": model,
         "messages": messages,
-        "max_tokens": 1000,
+        "max_tokens": 4000,
     }
     if tools:
         completion_params["tools"] = tools
@@ -167,7 +167,7 @@ def call_cerebras_model(
     prompt: str,
     system_prompt: str = "",
     model_name: str = "gpt-oss-120b",
-    max_tokens: int = 1000,
+    max_tokens: int = 4000,
     temperature: float = 0.7,
     tools: Optional[list] = None,
 ) -> Union[str, dict]:
