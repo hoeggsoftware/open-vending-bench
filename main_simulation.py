@@ -161,6 +161,30 @@ class VendingMachineSimulation:
         self.current_time += timedelta(days=days, minutes=minutes)
         return self.current_time
 
+    def _get_inventory_summary(self):
+        """Generate a concise inventory summary for the daily report"""
+        slots = self.vending_machine.get_slots()
+        stocked_count = sum(1 for slot in slots.values() if slot['item'] is not None)
+        total_items = sum(slot['quantity'] for slot in slots.values())
+
+        if stocked_count == 0:
+            return " - Machine is empty (0/12 slots stocked, 0 total items)"
+
+        lines = [f" - {stocked_count}/12 slots stocked, {total_items} total items"]
+        # Show top 3 products by quantity
+        product_totals = {}
+        for slot in slots.values():
+            if slot['item']:
+                name = slot['item'].name
+                product_totals[name] = product_totals.get(name, 0) + slot['quantity']
+
+        if product_totals:
+            top_3 = sorted(product_totals.items(), key=lambda x: x[1], reverse=True)[:3]
+            for product, qty in top_3:
+                lines.append(f" - {product}: {qty} units")
+
+        return "\n".join(lines)
+
     def get_day_report(self):
         """Generate comprehensive daily report for the agent, now includes storage report"""
         day_of_week = self.get_day_of_week()
@@ -186,15 +210,15 @@ class VendingMachineSimulation:
  - Total Messages/Actions: {self.message_count}
  - Simulation ID: {self.simulation_id}
  - Unread Emails: {len(self.email_system.get_unread_emails())}
- 
- INVENTORY: (Placeholder - to be implemented)
- - [Inventory details will be added when vending machine integration is complete]
- 
+
+ VENDING MACHINE INVENTORY:
+ {self._get_inventory_summary()}
+
  BACKROOM STORAGE:
  {self.storage_report if hasattr(self, "storage_report") else "No storage report available."}
- 
- YESTERDAY'S SALES: (Placeholder - to be implemented)
- - [Sales data will be added when sales simulation is integrated]
+
+ YESTERDAY'S SALES:
+ {self.last_sales_report if hasattr(self, "last_sales_report") else "No sales yet - machine not stocked."}
  
  ACTION REQUIRED: Continue managing your vending machine business.
  """

@@ -478,7 +478,19 @@ def execute_tool(tool_call, simulation_ref):
         function_name = tool_call["function"]["name"]
         arguments_str = tool_call["function"].get("arguments")
 
-    arguments = json.loads(arguments_str) if arguments_str else {}
+    # Parse arguments with error handling
+    try:
+        arguments = json.loads(arguments_str) if arguments_str else {}
+    except json.JSONDecodeError as e:
+        error_msg = f"❌ Tool call arguments contain invalid JSON: {e}"
+        print(error_msg)
+        print(f"   Function: {function_name}")
+        print(f"   Arguments string: {arguments_str[:200]}...")  # Show first 200 chars
+        return {
+            "success": False,
+            "message": f"\n\n[Tool error: {function_name} - Invalid JSON in arguments: {e}]",
+            "console_output": error_msg,
+        }
 
     console_output = f"🔧 Executing tool: {function_name}"
     print(console_output)
