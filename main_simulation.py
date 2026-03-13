@@ -2,6 +2,11 @@
 from datetime import datetime, timezone, timedelta
 from typing import Optional
 import uuid
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
+
 from database import SimulationDatabase
 from weather import generate_next_weather
 from agent import VendingMachineAgent

@@ -163,6 +163,73 @@ def ai_web_search(simulation_ref, query):
     return content
 
 
+# --- Fuzzy item name matching helper ---
+def normalize_item_name(name):
+    """Normalize item name for fuzzy matching"""
+    import re
+    # Convert to lowercase
+    normalized = name.lower()
+    # Replace underscores, hyphens with spaces
+    normalized = normalized.replace('_', ' ').replace('-', ' ')
+    # Remove parentheses, brackets and their contents for core matching
+    normalized = re.sub(r'\([^)]*\)', '', normalized)
+    normalized = re.sub(r'\[[^\]]*\]', '', normalized)
+    # Collapse multiple spaces
+    normalized = re.sub(r'\s+', ' ', normalized).strip()
+    return normalized
+
+
+def find_item_in_storage(storage, item_name):
+    """
+    Find an item in storage using business-friendly fuzzy matching.
+    Returns (actual_name, item_obj) or (None, None)
+
+    Students can use casual names like:
+    - "snickers" → matches "Snickers Mini Bars (1.5‑oz)"
+    - "trail mix" → matches "Classic Trail Mix 1‑oz Packs (12‑pk case, partial)"
+    - "Bottled_Water" → matches "Aquafina 16.9 oz Bottles (12‑pk case, partial)"
+    """
+    available_items = storage.list_all_items()
+
+    if not available_items:
+        return None, None
+
+    # Try exact match first (fast path)
+    item_obj = storage.get_item(item_name)
+    if item_obj is not None:
+        return item_name, item_obj
+
+    # Try case-insensitive exact match
+    for stored_name in available_items:
+        if stored_name.lower() == item_name.lower():
+            item_obj = storage.get_item(stored_name)
+            return stored_name, item_obj
+
+    # Try normalized match (handles underscores, hyphens, parentheses)
+    normalized_input = normalize_item_name(item_name)
+    for stored_name in available_items:
+        normalized_stored = normalize_item_name(stored_name)
+        if normalized_input == normalized_stored:
+            item_obj = storage.get_item(stored_name)
+            return stored_name, item_obj
+
+    # Try substring match (input is part of stored name)
+    for stored_name in available_items:
+        if item_name.lower() in stored_name.lower():
+            item_obj = storage.get_item(stored_name)
+            return stored_name, item_obj
+
+    # Try reverse substring (stored name core is in input)
+    for stored_name in available_items:
+        stored_core = normalize_item_name(stored_name)
+        input_lower = item_name.lower()
+        if stored_core and stored_core in input_lower:
+            item_obj = storage.get_item(stored_name)
+            return stored_name, item_obj
+
+    return None, None
+
+
 # --- Stock machine tool ---
 def stock_machine(simulation_ref, item_name, slot_id, quantity):
     """Move items from backroom storage to a vending machine slot"""
@@ -170,34 +237,16 @@ def stock_machine(simulation_ref, item_name, slot_id, quantity):
     vm = simulation_ref.vending_machine
     quantity = int(quantity)
 
-    # Check storage has the item - try fuzzy matching
-    item_obj = storage.get_item(item_name)
-    actual_name = item_name
+    # Use fuzzy matching to find the item
+    actual_name, item_obj = find_item_in_storage(storage, item_name)
 
     if item_obj is None:
-        # Try case-insensitive match
         available_items = storage.list_all_items()
-        for stored_name in available_items:
-            if stored_name.lower() == item_name.lower():
-                item_obj = storage.get_item(stored_name)
-                actual_name = stored_name
-                break
-
-        # Try partial match (item_name is substring of stored name)
-        if item_obj is None:
-            for stored_name in available_items:
-                if item_name.lower() in stored_name.lower():
-                    item_obj = storage.get_item(stored_name)
-                    actual_name = stored_name
-                    break
-
-        # Still no match - provide helpful error
-        if item_obj is None:
-            if available_items:
-                items_list = ", ".join(available_items[:5])
-                return f"Item '{item_name}' not found in storage. Available: {items_list}"
-            else:
-                return f"Item '{item_name}' not found. Storage is empty."
+        if available_items:
+            items_list = ", ".join(available_items[:5])
+            return f"Item '{item_name}' not found in storage. Available: {items_list}"
+        else:
+            return f"Item '{item_name}' not found. Storage is empty."
 
     available = storage.get_quantity(actual_name)
     if available < quantity:
@@ -213,6 +262,29 @@ def stock_machine(simulation_ref, item_name, slot_id, quantity):
     # Remove from storage
     storage.remove_items(actual_name, quantity)
     return f"Stocked {quantity}x {actual_name} into slot {slot_id}."
+
+
+# --- Set item price tool ---
+def set_item_price(simulation_ref, item_name, price):
+    """Set the selling price for an item in storage"""
+    storage = simulation_ref.storage
+    price = float(price)
+
+    if price < 0:
+        return f"Price must be non-negative (got ${price:.2f})."
+
+    # Use fuzzy matching to find the item
+    actual_name, item_obj = find_item_in_storage(storage, item_name)
+
+    if actual_name and storage.update_price(actual_name, price):
+        return f"Set price for '{actual_name}' to ${price:.2f}."
+    else:
+        available_items = storage.list_all_items()
+        if available_items:
+            items_list = ", ".join(available_items[:5])
+            return f"Item '{item_name}' not found in storage. Available: {items_list}"
+        else:
+            return f"Item '{item_name}' not found. Storage is empty."
 
 
 # Tools schema for LiteLLM function calling
@@ -429,13 +501,13 @@ TOOLS_LIST = [
         "type": "function",
         "function": {
             "name": "stock_machine",
-            "description": "Move items from backroom storage into a vending machine slot. Items must be in storage first (from deliveries).",
+            "description": "Move items from backroom storage into a vending machine slot. Items must be in storage first (from deliveries). You can use shortened product names like 'snickers' or 'trail mix' - the system will intelligently match them to supplier item names.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "item_name": {
                         "type": "string",
-                        "description": "Name of the item to stock (must match storage name exactly)",
+                        "description": "Product name (e.g., 'snickers', 'trail mix', 'bottled water'). The system will match this to the supplier's actual item name automatically.",
                     },
                     "slot_id": {
                         "type": "string",
@@ -447,6 +519,27 @@ TOOLS_LIST = [
                     },
                 },
                 "required": ["item_name", "slot_id", "quantity"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "set_item_price",
+            "description": "Set the selling price for an item in backroom storage. IMPORTANT: You must set prices for items after they arrive and before stocking them in the vending machine, or they will have $0.00 price and generate no revenue. You can use shortened product names - the system will match them intelligently.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "item_name": {
+                        "type": "string",
+                        "description": "Product name (e.g., 'snickers', 'trail mix', 'bottled water'). The system will match this to the supplier's actual item name automatically.",
+                    },
+                    "price": {
+                        "type": "number",
+                        "description": "Selling price in dollars (e.g., 2.50 for $2.50)",
+                    },
+                },
+                "required": ["item_name", "price"],
             },
         },
     },
@@ -470,6 +563,7 @@ TOOLS_FUNCTIONS = {
     "get_money_balance": get_money_balance,
     "ai_web_search": ai_web_search,
     "stock_machine": stock_machine,
+    "set_item_price": set_item_price,
 }
 
 

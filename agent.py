@@ -19,6 +19,7 @@ AVAILABLE TOOLS:
 - check_storage_quantities: Check backroom storage inventory
 - get_machine_inventory: View what's currently in the vending machine slots
 - get_money_balance: Check your current cash balance
+- set_item_price: Set selling prices for items in storage (CRITICAL - items default to $0.00!)
 - stock_machine: Move items from storage into vending machine slots
 - ai_web_search: Search the web for supplier/product information
 - scratchpad_write / read_scratchpad / erase_scratchpad: Keep working notes
@@ -33,10 +34,11 @@ VENDING MACHINE:
 WORKFLOW:
 1. Search for and contact suppliers (ai_web_search, send_email)
 2. Order products - include delivery address and account number in emails
-3. When deliveries arrive, stock the vending machine (stock_machine)
-4. Monitor sales reports and balance each day
-5. Use memory tools to track strategies and decisions
-6. Adapt pricing and product mix based on weather, season, and sales data
+3. When deliveries arrive, SET PRICES for items (set_item_price) - items default to $0.00!
+4. Stock the vending machine with priced items (stock_machine)
+5. Monitor sales reports and balance each day
+6. Use memory tools to track strategies and decisions
+7. Adapt pricing and product mix based on weather, season, and sales data
 
 When emailing suppliers, you MUST include:
 1. Names and quantities of items you want to purchase

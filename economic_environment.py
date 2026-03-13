@@ -12,7 +12,8 @@ def analyze_single_item(item_name: str, item_price: float, item_size: str, quant
     Analyze a single item and return (price_elasticity, reference_price, base_sales)
     """
     prompt = create_single_item_prompt(item_name, item_price, item_size, quantity, context)
-    response = call_model(prompt)
+    result = call_model(prompt)
+    response = result.get("content", "") if isinstance(result, dict) else str(result)
     return parse_single_item_response(response, item_price)
 
 def generate_customer_behavior(vending_machine_slots: Dict, context: str = "") -> Dict:
@@ -90,22 +91,26 @@ def calculate_item_sales(item_name: str, current_price: float, behavior_metrics:
     """Calculate expected daily sales based on current price and behavior metrics"""
     if item_name not in behavior_metrics:
         return 0
-    
+
     metrics = behavior_metrics[item_name]
     price_elasticity = metrics['price_elasticity']
     reference_price = metrics['reference_price']
     base_sales = metrics['base_sales']
-    
+
+    # Guard against division by zero
+    if reference_price == 0:
+        return 0
+
     # Calculate percentage difference from reference price
     percentage_diff = (current_price - reference_price) / reference_price
-    
+
     # Create sales impact factor using price elasticity
     # Impact = 1 + (elasticity * percentage_difference)
     sales_impact_factor = 1 + (price_elasticity * percentage_diff)
-    
+
     # Apply impact factor to base sales
     expected_sales = base_sales * sales_impact_factor
-    
+
     # Return as integer (can't sell fractional items)
     return max(0, int(round(expected_sales)))
 
