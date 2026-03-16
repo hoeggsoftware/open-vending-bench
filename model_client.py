@@ -339,9 +339,108 @@ def call_cerebras_model(
             }
 
 
+def call_buddy_model(
+    prompt: str,
+    system_prompt: str = "",
+    model_name: str = "GPT-OSS-120b",
+    max_tokens: int = 4000,
+    temperature: float = 0.7,
+    tools: Optional[list] = None,
+) -> Union[str, dict]:
+    """Call a Buddy HPC model via OpenAI-compatible API.
+
+    Args:
+        prompt: The user prompt.
+        system_prompt: Optional system message.
+        model_name: Buddy model identifier (e.g., "GPT-OSS-120b", "GPT-OSS-20b").
+        max_tokens: Max tokens to generate.
+        temperature: Sampling temperature.
+        tools: Optional list of tool schemas for function calling.
+    Returns:
+        Dict with "content" and "tool_calls" keys.
+    """
+    import os
+    import json
+    import requests
+
+    api_key = os.getenv("BUDDY_API_KEY")
+    if not api_key:
+        raise ValueError("BUDDY_API_KEY must be set in the environment")
+
+    # Build messages list
+    messages = []
+    if system_prompt:
+        messages.append({"role": "system", "content": system_prompt})
+    messages.append({"role": "user", "content": prompt})
+
+    # Buddy uses OpenAI-compatible API at UCO HPC
+    url = "https://ai.hpc.uco.edu/api/chat/completions"
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+    }
+    payload = {
+        "model": model_name,
+        "messages": messages,
+        "max_tokens": max_tokens,
+        "temperature": temperature,
+    }
+    if tools:
+        payload["tools"] = tools
+
+    try:
+        resp = requests.post(url, headers=headers, json=payload, timeout=120)
+        resp.raise_for_status()
+        data = resp.json()
+        message_data = data["choices"][0]["message"]
+
+        # Buddy may return reasoning_content separately; we want only the actual content
+        content = message_data.get("content", "")
+        # Ignore reasoning_content field if present - we only want the final answer
+        tool_calls = message_data.get("tool_calls")
+
+        if tool_calls and len(tool_calls) > 1:
+            tool_calls = [tool_calls[0]]
+
+        # Convert Pydantic tool_calls to dicts for JSON serialization
+        if tool_calls:
+            serializable_tool_calls = []
+            for tc in tool_calls:
+                # Convert to dict
+                if hasattr(tc, 'model_dump'):
+                    tc_dict = tc.model_dump()
+                elif hasattr(tc, 'dict'):
+                    tc_dict = tc.dict()
+                elif isinstance(tc, dict):
+                    tc_dict = tc
+                else:
+                    tc_dict = vars(tc)
+
+                # Validate that arguments are valid JSON before including
+                if "function" in tc_dict and "arguments" in tc_dict["function"]:
+                    args_str = tc_dict["function"]["arguments"]
+                    try:
+                        json.loads(args_str) if args_str else {}
+                        serializable_tool_calls.append(tc_dict)
+                    except json.JSONDecodeError:
+                        print(f"⚠️ Skipping malformed tool call with invalid JSON arguments")
+                        continue
+                else:
+                    serializable_tool_calls.append(tc_dict)
+
+            tool_calls = serializable_tool_calls if serializable_tool_calls else None
+
+        return {"content": content, "tool_calls": tool_calls}
+    except Exception as e:
+        return {
+            "content": f"[Mock Buddy response – network error: {e}]",
+            "tool_calls": None,
+        }
+
+
 def call_model(
     prompt: str,
-    model_type: str = "cerebras/gpt-oss-120b",
+    model_type: str = "buddy/GPT-OSS-120b",  # Changed from cerebras to buddy 2026-03-16
     system_prompt: str = "",
     tools: list = None,
 ):
@@ -349,7 +448,7 @@ def call_model(
 
     Args:
         prompt: The text prompt to send to the model.
-        model_type: Identifier for the model (e.g., "claude", "gpt-4", "cerebras").
+        model_type: Identifier for the model (e.g., "claude", "gpt-4", "cerebras", "buddy").
         system_prompt: Optional system message.
         tools: Optional list of tool schemas for function calling.
 
@@ -369,13 +468,31 @@ def call_model(
         "gpt-4o": "openai/gpt-4o",
         "gemini-2.5-pro": "vertex_ai/gemini-2.5-pro",
         "gemini-2.5-flash": "vertex_ai/gemini-2.5-flash",
+        # Cerebras (fast, external API)
         "cerebras": "cerebras/gpt-oss-120b",
         "cerebras-gpt-oss-120b": "cerebras/gpt-oss-120b",
+        # Buddy HPC (slower, UCO-hosted, no external costs)
+        "buddy": "buddy/GPT-OSS-120b",
+        "buddy-gpt-oss-120b": "buddy/GPT-OSS-120b",
+        "buddy-gpt-oss-20b": "buddy/GPT-OSS-20b",
+        "buddy-command-r": "buddy/Command-R",
+        "buddy-qwen3-coder": "buddy/Qwen3-Coder-Next",
     }
 
     litellm_model = model_mapping.get(model_type.lower(), model_type)
 
     try:
+        # Route Buddy models through the dedicated wrapper.
+        if "buddy" in litellm_model.lower():
+            model_name = (
+                litellm_model.split("/", 1)[1]
+                if "/" in litellm_model
+                else "GPT-OSS-120b"
+            )
+            result = call_buddy_model(
+                prompt, system_prompt=system_prompt, model_name=model_name, tools=tools
+            )
+            return result
         # Route Cerebras models through the dedicated wrapper.
         if "cerebras" in litellm_model.lower():
             model_name = (

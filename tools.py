@@ -134,8 +134,34 @@ def search_vector_db(simulation_ref, query, top_k=3):
 def get_machine_inventory(simulation_ref):
     """Get the current vending machine inventory"""
     slots = simulation_ref.vending_machine.get_slots()
+
+    # Collect empty slots by size
+    empty_small = []
+    empty_large = []
+    for slot_id, slot in sorted(slots.items()):
+        if slot["item"] is None:
+            if slot['size_type'] == 'small':
+                empty_small.append(slot_id)
+            else:
+                empty_large.append(slot_id)
+
     lines = ["VENDING MACHINE INVENTORY", "=" * 40]
-    for slot_id, slot in slots.items():
+
+    # Show summary of empty slots first
+    if empty_small:
+        lines.append(f"Empty SMALL slots (rows 0-1): {', '.join(empty_small)}")
+    else:
+        lines.append("Empty SMALL slots (rows 0-1): None - all full")
+
+    if empty_large:
+        lines.append(f"Empty LARGE slots (rows 2-3): {', '.join(empty_large)}")
+    else:
+        lines.append("Empty LARGE slots (rows 2-3): None - all full")
+
+    lines.append("-" * 40)
+
+    # Show detailed slot-by-slot inventory
+    for slot_id, slot in sorted(slots.items()):
         if slot["item"]:
             lines.append(
                 f"  Slot {slot_id} [{slot['size_type']}]: "
@@ -252,12 +278,29 @@ def stock_machine(simulation_ref, item_name, slot_id, quantity):
     if available < quantity:
         return f"Only {available} units of '{actual_name}' in storage (requested {quantity})."
 
-    # Attempt to stock into vending machine
-    if not vm.can_stock_item(slot_id, item_obj):
-        return f"Cannot stock '{actual_name}' in slot {slot_id} (wrong size or different item already there)."
+    # Check slot validity
+    if slot_id not in vm.slots:
+        return f"Invalid slot ID '{slot_id}'. Valid slots are 0-0 through 3-2."
 
+    slot = vm.slots[slot_id]
+
+    # Check size compatibility
+    if slot['size_type'] != item_obj.size:
+        return f"Cannot stock '{actual_name}' in slot {slot_id}: size mismatch. Item is {item_obj.size}, but slot {slot_id} (row {slot_id[0]}) requires {slot['size_type']} items. Use rows 0-1 for small items, rows 2-3 for large items."
+
+    # Check if slot already has a different item
+    if slot['item'] is not None and slot['item'].name != actual_name:
+        return f"Cannot stock '{actual_name}' in slot {slot_id}: slot already contains '{slot['item'].name}' ({slot['quantity']} units). Each slot can only hold ONE product type. Use get_machine_inventory to find empty slots."
+
+    # Check capacity
+    if slot['quantity'] + quantity > slot['max_capacity']:
+        current = slot['quantity']
+        available_space = slot['max_capacity'] - current
+        return f"Slot {slot_id} doesn't have enough capacity. Currently has {current} units, max is {slot['max_capacity']}, requested {quantity} (only {available_space} space available)."
+
+    # Stock the item
     if not vm.stock_item(slot_id, item_obj, quantity):
-        return f"Slot {slot_id} doesn't have enough capacity for {quantity} units."
+        return f"Failed to stock '{actual_name}' in slot {slot_id}. Unexpected error."
 
     # Remove from storage
     storage.remove_items(actual_name, quantity)
@@ -468,7 +511,7 @@ TOOLS_LIST = [
         "type": "function",
         "function": {
             "name": "get_machine_inventory",
-            "description": "View the current vending machine inventory showing all slots, items, quantities, and prices.",
+            "description": "View the current vending machine inventory. Shows which slots are empty (available for stocking) and which are occupied. Use this before calling stock_machine to find available slots.",
             "parameters": {"type": "object", "properties": {}, "required": []},
         },
     },
@@ -501,7 +544,7 @@ TOOLS_LIST = [
         "type": "function",
         "function": {
             "name": "stock_machine",
-            "description": "Move items from backroom storage into a vending machine slot. Items must be in storage first (from deliveries). You can use shortened product names like 'snickers' or 'trail mix' - the system will intelligently match them to supplier item names.",
+            "description": "Move items from backroom storage into a vending machine slot. IMPORTANT: Each slot can only hold ONE product type. If a slot already has a different item, you must choose a different slot. Use get_machine_inventory first to find empty slots. You can use shortened product names - the system will match them intelligently.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -511,7 +554,7 @@ TOOLS_LIST = [
                     },
                     "slot_id": {
                         "type": "string",
-                        "description": "Vending machine slot ID (e.g., '0-0', '1-2', '2-1'). Rows 0-1 are small items, rows 2-3 are large items.",
+                        "description": "Vending machine slot ID (e.g., '0-0', '1-2', '2-1'). Rows 0-1 are small items, rows 2-3 are large items. TIP: Use get_machine_inventory to see which slots are empty.",
                     },
                     "quantity": {
                         "type": "integer",
