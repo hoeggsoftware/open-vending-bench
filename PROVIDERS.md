@@ -73,20 +73,53 @@ CEREBRAS_API_KEY=csk-...  # Fast (~2 sec/call), external API
 BUDDY_API_KEY=sk-...      # Slower (~23 sec/call), UCO HPC, no external costs
 ```
 
-### Performance Comparison
+### Performance Comparison (Sequential)
 
 | Provider | Model | Speed (sec/call) | 200-msg Simulation | Cost |
 |----------|-------|------------------|-------------------|------|
-| Cerebras | gpt-oss-120b | ~2 | ~7 minutes | External API |
-| Buddy | GPT-OSS-120b | ~23 | ~77 minutes | UCO HPC (free) |
+| Cerebras | gpt-oss-120b | ~1.6 | ~5 minutes | External API |
+| Buddy | GPT-OSS-120b | ~11.4 | ~38 minutes | UCO HPC (free) |
 | Buddy | GPT-OSS-20b | ~49 | ~163 minutes | UCO HPC (free) |
+
+## Parallel Processing for Tournament Runs
+
+Buddy HPC supports parallel API calls, enabling multiple contestants to run simultaneously. Through extensive testing, we've determined the optimal batch size for tournament operations.
+
+### Batch Size Performance (Tested March 2026)
+
+| Batch Size | Total Time | Avg/Call | Speedup | 20 Contestants × 200 Messages |
+|------------|-----------|----------|---------|-------------------------------|
+| 3 parallel | 15.5s | 13.9s | 2.21x | 5.7 hours |
+| 5 parallel | 29.2s | 23.0s | 1.95x | 6.5 hours |
+| **6 parallel** ⭐ | **27.4s** | **20.0s** | **2.50x** | **5.1 hours** |
+| 8 parallel | 37.8s | 25.0s | 2.41x | 5.2 hours |
+| 12 parallel | 77.9s | 47.0s | 1.76x | 7.2 hours |
+
+**Key Findings:**
+- **Optimal batch size: 6 parallel calls**
+- Best throughput: 0.22 calls/second
+- GPT-OSS-120b (3 GPU) sweet spot is 6 concurrent requests
+- Beyond 6 parallel, heavy queuing occurs with diminishing returns
+- Batch size 3 shows high variance (11.6-22.9s)
+
+### Tournament Run Strategy
+
+For a tournament with 20 contestants running 200 messages each:
+
+**Recommended: Batches of 6**
+```bash
+# Run 6 contestants in parallel (3.3 batches × 20 contestants)
+# Total time: ~5.1 hours per tournament round
+```
+
+**Implementation:** Use a tournament runner script that spawns 6 simulator processes concurrently, waits for batch completion, then starts the next batch.
 
 ## Recommendations
 
-- **Development/Testing**: Use `--model cerebras` for quick iterations
-- **Tournament Runs**: Use `--model buddy` for official simulations (no external costs)
-- **Overnight Runs**: Buddy's slower speed is acceptable for scheduled tournament batches
-- **Cost Optimization**: Use Cerebras only when speed is critical
+- **Development/Testing**: Use `--model cerebras` for quick iterations (~5 min per 200-msg sim)
+- **Tournament Runs**: Use `--model buddy` with **6 parallel batches** (~5.1 hours for 20 contestants)
+- **Single Test Run**: Buddy sequential is fine (~38 minutes per contestant)
+- **Cost Optimization**: Buddy eliminates all external API costs
 
 ## Troubleshooting
 
@@ -100,6 +133,30 @@ BUDDY_API_KEY=sk-...      # Slower (~23 sec/call), UCO HPC, no external costs
 - Check UCO HPC cluster is accessible
 
 ### Slow Performance
-- This is expected with Buddy (23 sec/call)
+- Sequential Buddy calls take ~11-12 sec/call (expected)
+- Parallel batches take ~20-30 sec/call depending on batch size (expected)
 - Consider using Cerebras for development, Buddy for production
-- Plan for overnight execution for tournament runs
+- Use batch size 6 for optimal tournament throughput
+
+## Testing Performance
+
+Test scripts are included to verify provider performance and optimal batch sizes:
+
+### Basic Provider Test
+```bash
+python3 test_providers.py
+```
+Compares Cerebras vs Buddy sequential performance.
+
+### Batch Size Optimization Test
+```bash
+python3 test_optimal_batch.py
+```
+Tests batch sizes 3, 5, 6, and 8 with 3 runs each. Takes ~5-10 minutes.
+
+### Custom Parallel Test
+```python
+python3 test_parallel.py  # Tests 5 parallel calls
+```
+
+These tests help validate that the Buddy HPC cluster is performing as expected and can guide adjustments if the cluster configuration changes.
