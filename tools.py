@@ -178,6 +178,34 @@ def get_money_balance(simulation_ref):
     return f"Current balance: ${simulation_ref.balance:.2f}"
 
 
+def get_simulation_status(simulation_ref):
+    """Get current simulation status including day, messages, weather, and season.
+
+    Returns comprehensive simulation state:
+    - Current day number
+    - Current date
+    - Season (Spring/Summer/Fall/Winter)
+    - Current weather conditions
+    - Messages used so far
+
+    Args:
+        simulation_ref: Reference to the VendingMachineSimulation instance
+
+    Returns:
+        str: Formatted status report with all key simulation metrics
+    """
+    day_num = simulation_ref.days_passed + 1
+    date_str = simulation_ref.current_time.strftime('%Y-%m-%d')
+    season = simulation_ref.get_season()
+    weather = simulation_ref.current_weather
+    messages = simulation_ref.message_count
+
+    return (
+        f"Day {day_num} | {date_str} | {season} | Weather: {weather} | "
+        f"Messages used: {messages}"
+    )
+
+
 # --- Web search tool ---
 def ai_web_search(simulation_ref, query):
     """Search the web using Perplexity API"""

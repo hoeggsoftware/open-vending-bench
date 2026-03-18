@@ -1,0 +1,22 @@
+# Multi-Tenant MCP Server Configuration
+#
+# Each contestant gets their own isolated simulation with their own token,
+# database, and message budget. The server runs as a single process serving
+# all contestants simultaneously.
+
+contestants:
+  - name: Jerry
+    token: jerry-secret-token-abc123
+    weather_seed: 42
+    start_date: "2026-07-01"
+    message_budget: 200
+    db_path: /tmp/jerry.db
+    starting_balance: 500
+
+  - name: Madeline
+    token: madeline-secret-token-xyz999
+    weather_seed: 42
+    start_date: "2026-07-01"
+    message_budget: 200
+    db_path: /tmp/madeline.db
+    starting_balance: 500

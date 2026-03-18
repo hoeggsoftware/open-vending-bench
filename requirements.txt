@@ -2,6 +2,8 @@ litellm
 requests
 python-dotenv
 cerebras-cloud-sdk
+fastmcp>=3.0.0
+pyyaml
 
 
 

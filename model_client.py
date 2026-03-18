@@ -159,7 +159,9 @@ def call_model_litellm(
 
             tool_calls = serializable_tool_calls if serializable_tool_calls else None
 
-        return {"content": message.get("content", ""), "tool_calls": tool_calls}
+        # Handle reasoning models (Cerebras, etc.) that return content in reasoning_content field
+        content = message.get("content") or message.get("reasoning_content", "")
+        return {"content": content, "tool_calls": tool_calls}
     except Exception as e:
         # Provide a mock response for authentication errors to keep the simulation running
         if "AuthenticationError" in str(e) or "invalid x-api-key" in str(e):
@@ -323,8 +325,11 @@ def call_cerebras_model(
             data = resp.json()
             message_data = data["choices"][0]["message"]
 
-            content = message_data.get("content", "") or message_data.get(
-                "reasoning", ""
+            # Handle reasoning models that return content in reasoning_content field
+            content = (
+                message_data.get("content")
+                or message_data.get("reasoning_content", "")
+                or message_data.get("reasoning", "")
             )
             tool_calls = message_data.get("tool_calls")
 
@@ -333,6 +338,8 @@ def call_cerebras_model(
 
             return {"content": content, "tool_calls": tool_calls}
         except Exception as e2:
+            # Log the actual error before returning mock response
+            print(f"⚠️ Cerebras HTTP request failed: {e2}")
             return {
                 "content": "[Mock Cerebras response – network unreachable]",
                 "tool_calls": None,
@@ -440,7 +447,7 @@ def call_buddy_model(
 
 def call_model(
     prompt: str,
-    model_type: str = "buddy/GPT-OSS-120b",  # Changed from cerebras to buddy 2026-03-16
+    model_type: str = None,
     system_prompt: str = "",
     tools: list = None,
 ):
@@ -449,6 +456,7 @@ def call_model(
     Args:
         prompt: The text prompt to send to the model.
         model_type: Identifier for the model (e.g., "claude", "gpt-4", "cerebras", "buddy").
+                   If None, reads from SUPPLIER_MODEL environment variable (defaults to "cerebras").
         system_prompt: Optional system message.
         tools: Optional list of tool schemas for function calling.
 
@@ -456,6 +464,11 @@ def call_model(
         A dict ``{"content": <str>, "tool_calls": <list|None>}`` – even when no tools are
         requested – to keep the return type consistent across all back‑ends.
     """
+    import os
+
+    # Default to environment variable if model_type not specified
+    if model_type is None:
+        model_type = os.getenv("SUPPLIER_MODEL", "cerebras")
 
     # Map common model shortcuts to their Litellm identifiers.
     model_mapping = {

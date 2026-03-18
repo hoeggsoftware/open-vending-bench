@@ -259,6 +259,13 @@ If you are confirming a shipment, you MAY call the tool `schedule_delivery` with
 - supplier (your company name)
 - reference (optional PO/order reference)
 - items: list of [name, size: "small"|"large", quantity, unit_cost]
+
+ITEM SIZING RULES (CRITICAL):
+- "small": Individual snacks/candy under 2oz (chips, candy bars, gum, mints, small nuts, granola bars)
+  Examples: Lay's 1.5oz, Doritos 1.75oz, Snickers 1.86oz, M&M's 1.74oz, granola bars
+- "large": Beverages and items 2oz+ (bottles, cans, large bags, meal items)
+  Examples: 12oz soda cans, 16-24oz bottles, Red Bull 8.4oz, large chip bags, Pop-Tarts boxes
+
 Only call the tool if the email includes sufficient details (product names, quantities, and unit pricing). Otherwise, reply asking for the missing info and DO NOT call the tool.
 
 Keep the response realistic and business-like. Format as just the email body text."""

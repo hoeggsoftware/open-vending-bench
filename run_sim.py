@@ -104,6 +104,31 @@ Examples:
         default=None,
         help="Custom path for KV store persistence file (for contestant isolation)",
     )
+    parser.add_argument(
+        "--mode",
+        type=str,
+        choices=["internal", "server", "multi-server"],
+        default="internal",
+        help="Simulation mode: 'internal' (default, built-in agent), 'server' (MCP server for single external agent), or 'multi-server' (multi-tenant MCP server)",
+    )
+    parser.add_argument(
+        "--port",
+        type=int,
+        default=8000,
+        help="Port for MCP server mode (default: 8000)",
+    )
+    parser.add_argument(
+        "--token",
+        type=str,
+        default=None,
+        help="Bearer token for MCP server auth (generates random UUID if not provided)",
+    )
+    parser.add_argument(
+        "--config",
+        type=str,
+        default=None,
+        help="Path to YAML config file for multi-server mode (defines contestants and their tokens)",
+    )
 
     args = parser.parse_args()
 
@@ -137,45 +162,92 @@ Examples:
         with open(args.playbook, 'r') as f:
             playbook = f.read()
 
-    # Restore from database or create new simulation
-    if args.restore:
-        simulation = VendingMachineSimulation.from_database(
-            db_path=args.restore,
-            model_type=args.model,
-            store_state=store_state,
-            strategy_prompt=strategy_prompt,
-            playbook=playbook,
-            start_date=args.start_date,
-            weather_seed=args.weather_seed,
-            kv_persist_path=args.kv_persist_path,
-        )
-    else:
-        simulation = VendingMachineSimulation(
-            store_state=store_state,
-            model_type=args.model,
-            db_path=args.db_path,
-            starting_balance=args.starting_balance,
-            start_date=args.start_date,
-            weather_seed=args.weather_seed,
-            strategy_prompt=strategy_prompt,
-            playbook=playbook,
-            kv_persist_path=args.kv_persist_path,
-        )
+    # Create simulation for internal and server modes
+    # (multi-server mode creates its own simulations from config file)
+    simulation = None
+    if args.mode != "multi-server":
+        if args.restore:
+            simulation = VendingMachineSimulation.from_database(
+                db_path=args.restore,
+                model_type=args.model,
+                store_state=store_state,
+                strategy_prompt=strategy_prompt,
+                playbook=playbook,
+                start_date=args.start_date,
+                weather_seed=args.weather_seed,
+                kv_persist_path=args.kv_persist_path,
+            )
+        else:
+            simulation = VendingMachineSimulation(
+                store_state=store_state,
+                model_type=args.model,
+                db_path=args.db_path,
+                starting_balance=args.starting_balance,
+                start_date=args.start_date,
+                weather_seed=args.weather_seed,
+                strategy_prompt=strategy_prompt,
+                playbook=playbook,
+                kv_persist_path=args.kv_persist_path,
+            )
 
     try:
-        simulation.start_simulation(args.max_messages)
+        if args.mode == "internal":
+            # Internal mode: use built-in agent loop (existing behavior)
+            simulation.start_simulation(args.max_messages)
+        elif args.mode == "server":
+            # Server mode: start MCP server for single external agent
+            if args.no_store_state:
+                print("ERROR: --no-store-state cannot be used with --mode server.")
+                print("Server mode requires state logging for tournament scoring.")
+                sys.exit(1)
+
+            import uuid
+            from mcp_server import MCPSimulationServer
+
+            # Generate token if not provided
+            token = args.token if args.token else str(uuid.uuid4())
+
+            # Create and start MCP server
+            server = MCPSimulationServer(
+                simulation=simulation,
+                message_budget=args.max_messages,
+                port=args.port,
+                token=token
+            )
+            server.start()
+        else:
+            # Multi-server mode: start multi-tenant MCP server for multiple contestants
+            if not args.config:
+                print("ERROR: --config is required for --mode multi-server")
+                sys.exit(1)
+
+            import yaml
+            from mcp_server import MultiTenantMCPServer
+
+            with open(args.config) as f:
+                config = yaml.safe_load(f)
+
+            server = MultiTenantMCPServer(
+                contestants=config["contestants"],
+                port=args.port,
+            )
+            server.start()
+
     except KeyboardInterrupt:
         print("\nSimulation interrupted by user")
     finally:
-        if args.evaluate and store_state:
-            from evaluation import SimulationEvaluator
+        # Only run evaluation and cleanup for internal/server modes
+        # (multi-server mode manages its own database connections)
+        if args.mode != "multi-server":
+            if args.evaluate and store_state:
+                from evaluation import SimulationEvaluator
 
-            evaluator = SimulationEvaluator(simulation.db.db_path)
-            evaluator.print_report(simulation.simulation_id)
-            evaluator.close()
+                evaluator = SimulationEvaluator(simulation.db.db_path)
+                evaluator.print_report(simulation.simulation_id)
+                evaluator.close()
 
-        simulation.db.close()
-        print("Simulation complete.")
+            simulation.db.close()
+            print("Simulation complete.")
 
 
 if __name__ == "__main__":
